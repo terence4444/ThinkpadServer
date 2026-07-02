@@ -81,8 +81,8 @@ sudo systemctl restart ssh
 假设有两位运维用户 `alice` 和 `bob`：
 ```bash
 # 极简创建账户，不为他们设置初始密码（只能通过证书/常规公钥登录）
-sudo adduser --gecos "" alice
-sudo adduser --gecos "" bob
+sudo adduser --disabled-password --gecos "" alice
+sudo adduser --disabled-password --gecos "" bob
 ```
 
 ### 2. 赋予 Sudo 组特权
@@ -104,19 +104,47 @@ sudo chmod 440 /etc/sudoers.d/90-sudo-cert-users
 
 ---
 
-## 5. 步骤四：极速证书签发与分发
+## 5. 步骤四：证书签发与分发 (两种可选方案)
 
-当有新运维人员 Alice 需要加入并需要登录时，其签发过程极其快速。
+根据团队运维习惯与安全等级，可以选择以下任意一种方案进行证书签发和分发：
 
-### 1. 客户端生成密钥对
+### 方案 A：管理员统一生成与分发 (开发/测试环境极速推荐 🚀)
+*最省心的方案，新用户零命令行门槛。由管理员在服务器直接生成密钥对和证书，通过密码管理器发送给用户。*
+
+#### 1. 管理员在服务器上为新用户生成密钥对并签发证书
+假设要为新运维人员 `jack` 建立访问：
+```bash
+# 1. 直接在服务器临时目录生成密钥对（-N "" 表示不设私钥密码）
+ssh-keygen -t ed25519 -N "" -f /tmp/jack_id_ed25519 -C "jack@company"
+
+# 2. 签发 10 年有效期（+520w）的证书，仅允许其以本地 jack 账户登录
+sudo ssh-keygen -s /etc/ssh/ssh_ca \
+           -I "clickhouse_test_jack" \
+           -n jack \
+           -V +520w \
+           /tmp/jack_id_ed25519.pub
+```
+*这将在 `/tmp` 目录下生成三个文件：私钥 `jack_id_ed25519`、公钥 `jack_id_ed25519.pub` 以及证书 `jack_id_ed25519-cert.pub`。*
+
+#### 2. 安全分发
+管理员将以下两个关键文件通过安全密码管理器（如 Bitwarden、1Password 或其他加密渠道）安全分发给 Jack：
+1. **私钥文件**：`jack_id_ed25519` (Jack 收到后需放入 `~/.ssh/` 并更名为 `id_ed25519`，且 `chmod 600`)
+2. **证书文件**：`jack_id_ed25519-cert.pub` (Jack 收到后需放入 `~/.ssh/` 并更名为 `id_ed25519-cert.pub`)
+
+---
+
+### 方案 B：客户端自主生成，管理员单向签发 (经典安全方案 🔒)
+*标准的安全做法，私钥全程不离用户本机，确保管理员也无法获取用户的私钥。*
+
+#### 1. 客户端生成密钥对
 Alice 在其本地电脑（Windows/macOS/Linux）的命令行中生成密钥对：
 ```bash
 ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -C "alice@laptop"
 ```
-Alice 将其公钥 `~/.ssh/id_ed25519.pub` 发送给服务器管理员（也可以通过聊天工具发给管理员临时粘贴）。
+Alice 将其生成的公钥 `~/.ssh/id_ed25519.pub` 发送给管理员。
 
-### 2. 服务器管理员在宿主机本地签发 10 年证书
-管理员拿到 Alice 的公钥（假设临时保存在服务器的 `/tmp/alice_id_ed25519.pub`）后，在服务器直接运行：
+#### 2. 服务器管理员在本地签发 10 年证书
+管理员拿到公钥（假设临时保存为服务器的 `/tmp/alice_id_ed25519.pub`）后，在服务器运行：
 ```bash
 # 签发 10 年有效期（+520w）的证书，仅允许其以本地 alice 账户登录
 sudo ssh-keygen -s /etc/ssh/ssh_ca \
@@ -127,25 +155,49 @@ sudo ssh-keygen -s /etc/ssh/ssh_ca \
 ```
 *这将在同目录下生成 `/tmp/alice_id_ed25519-cert.pub` 证书。*
 
-### 3. 返回证书
-管理员将 `/tmp/alice_id_ed25519-cert.pub` 文件发回给 Alice。
+#### 3. 返回证书
+管理员将 `/tmp/alice_id_ed25519-cert.pub` 证书文件发回给 Alice 即可。
 
 ---
 
 ## 6. 步骤五：客户端极速登录
 
-### 1. 放置证书
-Alice 收到证书后，将其重命名并放置在本地电脑的 `~/.ssh/` 目录下。
-* 私钥路径：`~/.ssh/id_ed25519`
-* 证书路径：`~/.ssh/id_ed25519-cert.pub` (必须与私钥同名，且带 `-cert.pub` 后缀)
+根据客户端工具的不同，选择以下对应的配置方式：
 
-### 2. 登录与无感提权测试
+### 1. 方式一：标准 OpenSSH 客户端 (Linux/macOS/Windows Terminal)
+Alice 收到证书后，将其重命名并放置在本地电脑的 `~/.ssh/` 目录下。
+* **私钥路径**：`~/.ssh/id_ed25519` (Linux/macOS 下需执行 `chmod 600 ~/.ssh/id_ed25519`)
+* **证书路径**：`~/.ssh/id_ed25519-cert.pub` (必须与私钥同名，且带 `-cert.pub` 后缀，SSH 登录时会自动识别)
+
 在本地电脑终端中直接运行：
 ```bash
 # 证书验证将自动无密码登录
 ssh alice@<clickhouse-server-ip>
 ```
-进入终端后，Alice 需要部署 ClickHouse 服务、重载配置或查看系统负载时，可以执行：
+
+---
+
+### 2. 方式二：PuTTY 客户端 (Windows 端极简单文件集成 🚀)
+从 **PuTTY 0.78 及以上版本**开始，PuTTYgen 支持**将 OpenSSH 证书直接内嵌集成到 `.ppk` 私钥中**。这样管理员或用户最终只需分发/保管**单个 `.ppk` 文件**，极为优雅。
+
+#### 第一步：使用 PuTTYgen 生成内嵌证书的 `.ppk`
+1. 打开 **PuTTYgen**。
+2. 点击 **Load** 按钮，导入管理员分发的 OpenSSH 格式私钥文件（如 `jack_id_ed25519`）。
+3. 导入成功后，点击顶部菜单栏的 **Key** -> **Add certificate to key**。
+4. 浏览并选择对应的证书文件 **`jack_id_ed25519-cert.pub`**。
+   *(此时你会注意到“Public key for pasting”区域变成了展示证书详情的按钮。注意：PuTTYgen 底部默认的 Parameters RSA 2048 仅对生成新密钥生效，不会影响已导入的 Ed25519 密钥性质)*
+5. 点击 **Save private key**，将其保存为全新的 **`jack_id_ed25519.ppk`** 文件。该文件内部已完美融合了私钥和证书。
+
+#### 第二步：在 PuTTY 中加载并登录
+1. 打开 **PuTTY**，展开左侧树状菜单：**Connection -> SSH -> Auth -> Credentials**。
+2. 在 **Private key file for authentication** 框中，点击 **Browse** 导入刚才生成的内嵌版 `jack_id_ed25519.ppk`。
+3. *(可选)* 展开左侧 **Connection -> Data**，在 **Auto-login username** 中填入服务器同名账户（如 `jack`），省去手动敲用户名的步骤。
+4. 返回 **Session** 页面保存会话，点击 **Open**，即可实现一键免密极速登录！
+
+---
+
+### 3. 登录后的无感 Sudo 提权测试
+无论使用哪种客户端，登录进入终端后，由于我们在步骤三中配置了免密 Sudo，均可执行：
 ```bash
 # 完美的免密提权，不会提示任何密码输入
 sudo -i
