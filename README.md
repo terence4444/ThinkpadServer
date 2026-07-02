@@ -45,6 +45,15 @@
 *   **[磁盘分区战略与 ext4 高吞吐挂载优化](docs/clickhouse_thinkpad/partition.md)**
     *   1GB 充足 UEFI 引导分区、8G 物理防 OOM 安全气囊 Swap 规划
     *   `/data` 数据盘 `noatime,nodiratime` 专属挂载参数，最大化保护 SSD 闪存寿命并加速 ClickHouse 写入
+*   **[多用户 SSH 证书登录与 Sudo 权限安全管控](docs/clickhouse_thinkpad/ssh_cert_login.md)**
+    *   基于 SSH 证书局域网 (CA) 的多用户无密码高安全级别登录设计
+    *   本地 Sudo 权限的两类提权凭据模式 (独立 Unix 密码安全阻断 vs 免密高吞吐) 的权衡与配置
+    *   服务器防越权提权、密钥丢失提前吊销 (KRL) 等核心避坑加固实践
+*   **[沙盒开发系统崩溃快速恢复与灾备重建](docs/clickhouse_thinkpad/system_recovery.md)**
+    *   基于 `/data` 物理隔离分区的系统凭证与用户 CA “秒级还原”机制
+    *   ClickHouse 数据库的元数据/表结构极速导出与测试脏数据物理清洗
+    *   宿主机坏死一键自动化 Bootstrap 重建脚本（网络挂载、调优、常用组件、内网防火墙一键配齐）
+    *   网卡死机、磁盘爆满、Sudoers 写错锁提权等三大经典沙盒崩溃高频“应急三板斧”速查
 
 ---
 

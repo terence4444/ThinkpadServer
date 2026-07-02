@@ -79,3 +79,50 @@ action=/usr/local/bin/backlight_on.sh
     *   按下 ThinkPad 的一键闭麦物理按键 (`Fn + F4`)，屏幕背光瞬间**完全熄灭**。
     *   按下亮度调小键 (`Fn + F5`)，屏幕**立即唤醒**，多次按还可以增加亮度。
     *   完美实现了类似于服务器物理冷屏开关的效果！
+
+---
+
+## 4. 开机自动闭屏 (Systemd 服务集成)
+
+当笔记本作为服务器运行时，如果发生断电重启或系统更新重启，开机时默认会亮起屏幕。为了在系统启动后自动将屏幕背光切断（实现物理黑屏），最安全、最现代的做法是配置一个 `Systemd` 开机自启服务。
+
+### 4.1 创建 Systemd 服务文件
+
+在 `/etc/systemd/system/` 目录下创建一个名为 `backlight-boot-off.service` 的服务文件：
+
+```ini
+[Unit]
+Description=Turn off screen backlight on boot
+After=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/backlight_off.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### 4.2 启用并启动服务
+
+执行以下命令来加载、启用并立即运行该服务：
+
+```bash
+# 重新加载 Systemd 配置
+sudo systemctl daemon-reload
+
+# 启用开机自启并立即执行一次
+sudo systemctl enable --now backlight-boot-off.service
+```
+
+### 4.3 验证状态
+
+你可以通过以下命令检查该服务是否正常执行：
+
+```bash
+sudo systemctl status backlight-boot-off.service
+```
+
+*   **期望状态**：输出显示 `active (exited)`，并且日志中能看到类似 `Screen backlight turned off successfully.` 的输出。
+*   此后，每次笔记本开机启动进入多用户模式（`multi-user.target`）后，系统都会自动调用 `/usr/local/bin/backlight_off.sh` 彻底熄灭背光，无需任何人手动按键。
