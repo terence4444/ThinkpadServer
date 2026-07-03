@@ -12,6 +12,14 @@
 *   **完全切断背光 (0W功耗/0发热)**:
     普通的屏幕保护程序只是把屏幕画成全黑，但 LCD 背光灯管依然在发光。直接往系统的 `brightness` 写入 `0`，可彻底关闭 LED 背光，达到物理黑屏状态。
 
+### 🚨 核心避坑：找不到背光控制路径（如 `/sys/class/backlight/` 目录为空）
+在具有双显卡（Intel/AMD 核显 + NVIDIA 独显）的 ThinkPad 工作站（如 P16）上，如果你在系统中发现上述背光控制路径不存在，说明系统当前可能处于**仅独显直连模式 (Discrete Graphics)**，或者 RHEL 系统内核没有正确识别到 Intel 集显。
+
+**完美解决方案**：
+1.  **处理独显驱动与电源优化**：首先参照专属指南 **[NVIDIA 独显极致省电、降温与休眠配置](nvidia_gpu_power.md)**，部署 NVIDIA 官方专有驱动、配置 Runtime 深度休眠并关闭唤醒服务。
+2.  **切换显卡模式为 Hybrid**：重新启动笔记本，按 `F1` 进入 UEFI BIOS，依次进入 `Config ➙ Display ➙ Graphic Devices`，将显卡选项从 `Discrete Graphics` 改为 **`Hybrid Graphics`（混合显卡模式）**。
+3.  **恢复集显驱动控制**：保存重启后，主板会默认将内置物理屏幕挂载在低功耗的 **Intel/AMD 集显**上驱动，系统的 `/sys/class/backlight/intel_backlight/`（或 `amdgpu_bl0`）设备路径会瞬间显现。此时再执行背光控制和 ACPI 按键绑定，即可实现零功耗物理闭屏与唤醒。
+
 ---
 
 ## 2. 核心控制脚本
@@ -57,14 +65,16 @@ sudo systemctl enable --now acpid
 根据捕获到的事件代码，我们在 `/etc/acpi/events/` 中编写配置文件。
 
 #### 1) 配置一键闭屏事件 `/etc/acpi/events/screen_off`
+nano /etc/acpi/events/screen_off
 ```ini
-event=button/mute MUTE.*
+event=video/brightnessdown
 action=/usr/local/bin/backlight_off.sh
 ```
 
 #### 2) 配置一键亮屏与调光事件 `/etc/acpi/events/screen_on`
+nano /etc/acpi/events/screen_on
 ```ini
-event=video/brightnessdown BRTDN.*
+event=video/brightnessup
 action=/usr/local/bin/backlight_on.sh
 ```
 

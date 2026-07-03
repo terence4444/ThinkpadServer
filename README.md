@@ -28,6 +28,9 @@
     *   轻量级 Bash 放电监控脚本，40% 电量以下自动触发关机倒计时，通过模块化钩子优雅停止 ClickHouse/SAP 等高负载应用
 *   **[笔记本合盖休眠行为控制](docs/common/sleep_config.md)**
     *   修改 systemd `logind.conf`，配置合盖不挂起/不休眠
+*   **[NVIDIA 独显极致省电、降温与休眠配置](docs/common/nvidia_gpu_power.md)**
+    *   在无图形环境下部署 NVIDIA 官方专有驱动，配置 Runtime Power Management (`0x02` 级别最深休眠)
+    *   写入 PCIe 自动挂起规则，完全切断空闲显卡的 PCIe 供电并锁死 (Mask) 唤醒服务
 *   **[网络规范、OpenVPN 自动拨号与功耗 Bug 排查](docs/common/network_vpn.md)**
     *   路由器 DHCP 静态绑定规避 IP 冲突
     *   软链接解决 Systemd 在超长或特殊字符 OpenVPN 配置文件名下的转义报错
