@@ -1,0 +1,54 @@
+# ==============================================================================
+# Logrotate rules for the ThinkPad server power-management logs.
+#
+# Deploy to: /etc/logrotate.d/power_monitor   (mode 0644, owned by root)
+#
+# Covers both writers:
+#   /var/log/power_monitor.log  - power_monitor.sh plus ALL hook output, because
+#                                 the dispatcher redirects every hook into it
+#   /var/log/s4hana_start.log   - s4hana_start.sh
+#
+# Rotation policy: daily, keep 180 days, and rotate early if a single log grows
+# past 20 MB (a stuck hook can produce a lot of output in one outage).
+# ==============================================================================
+
+/var/log/power_monitor.log
+/var/log/s4hana_start.log
+{
+    # Time-based rotation: one file per day, 180 days of history.
+    daily
+    rotate 180
+
+    # Size-based safety valve: also rotate as soon as a log passes 20 MB, even
+    # if the day is not over. /var must never fill up - a full file system would
+    # break the very shutdown sequence this log is documenting.
+    # (maxsize requires logrotate >= 3.8.1; RHEL 10 and Debian 13 are far newer.)
+    maxsize 20M
+
+    # Name the archives power_monitor.log-20260811 instead of .1, .2, .3 - with
+    # 180 generations the date is the only readable way to find an outage.
+    dateext
+    dateformat -%Y%m%d
+
+    # No error before the first power event ever creates the file.
+    missingok
+    # Do not rotate an untouched log every single day.
+    notifempty
+    # 180 days of plain text is pointless to keep uncompressed.
+    compress
+
+    # copytruncate is deliberate, not the default rename+create.
+    # power_monitor.sh launches its hooks as `"$script" >> "$LOG_FILE" 2>&1 &`,
+    # so a hook like 20_s4hana.sh holds this file open for the entire time it
+    # takes to stop HANA. With rename+create, that running hook would keep
+    # writing into the already-rotated inode and the live log would look empty
+    # during the one event you actually care about.
+    # The classic copytruncate drawback - a long-lived writer keeping a stale
+    # offset and producing a sparse file - does not apply here: `>>` opens the
+    # file with O_APPEND, so every write lands at the current end of file.
+    #
+    # No `create` directive: logrotate ignores it when copytruncate is active.
+    # The live file keeps its original inode and permissions (root:root 0644,
+    # created by the first `>>` from the scripts running as root).
+    copytruncate
+}

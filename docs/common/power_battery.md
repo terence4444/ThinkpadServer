@@ -64,7 +64,8 @@ ThinkPad 官方 BIOS 通常不提供充电上限设置。如果直接插着电�
     - **痛点二 (服务破坏与数据库损坏)**: 撤销关机后，如果直接不管或者立刻强行重启，若此时 ClickHouse/S4HANA 的关闭脚本还在后台执行数据刷盘，强行中断会造成数据库损坏。
     - **完美解法**: 
       1. 一旦检测到电源恢复，立即调用 `shutdown -c` 撤销关机，锁定系统不断电。
-      2. 循环检查 `/run/power_monitor_hooks.pids` 中的进程状态，**等待所有运行中的关闭脚本安全执行完毕（最多等待 5 分钟）**，确保数据已完全安全落盘。
+      2. 循环检查 `/run/power_monitor_hooks.pids` 中的进程状态，**等待所有运行中的关闭脚本安全执行完毕（`HOOK_WAIT_TIMEOUT`，默认最多 60 分钟）**，确保数据已完全安全落盘。
+         > ⚠️ 该等待时间**必须大于最慢的钩子**。停止 SAP HANA 可能远超 5 分钟，若在 `HDB stop` 执行中途重启，等于把数据库硬停 —— 对 `log_mode = overwrite` 的实例（无日志备份、不能前滚）风险尤其大。等待超时后脚本仍会重启，但会在日志中打出 WARNING 明确告知"可能有数据库被硬停"。
       3. 确认所有钩子完全退出后，立即下发 `/sbin/reboot` **执行系统热重启**。
       4. 系统热重启后，所有被关掉的数据库和应用服务将通过 Systemd 的开机自启干净地重新加载，恢复正常服务，完美闭环！
 
@@ -80,8 +81,25 @@ ThinkPad 官方 BIOS 通常不提供充电上限设置。如果直接插着电�
 ### 模块化钩子 (Custom Shutdown Hooks)
 本仓库在 `scripts/common/shutdown.d/` 目录下提供了模块化优雅关机的脚本模板：
 
-*   👉 **[ClickHouse 优雅关机模板：scripts/common/shutdown.d/10_clickhouse.sh](../../scripts/common/shutdown.d/10_clickhouse.sh)**
+*   👉 **[ClickHouse 优雅关机模板：scripts/common/shutdown.d/10_clickhouse.sh](../../scripts/common/shutdown.d/10_clickhouse.sh)**（⚠️ 当前为空文件，尚待填写）
 *   👉 **[SAP S/4HANA & HANA 优雅关机模板：scripts/common/shutdown.d/20_s4hana.sh](../../scripts/common/shutdown.d/20_s4hana.sh)**
+
+S/4HANA 钩子的特殊行为：因为该 HANA 实例使用 `log_mode = overwrite`，脚本**绝不强杀数据库**，而是在 `HDB stop` 运行期间持续把系统关机时刻往后推（每次 `+10` 分钟，仅在剩余不足 180 秒时续期），直到数据库确认停止后才关机；只有电量跌到 `CRITICAL_BATTERY`（默认 8%）以下才放弃等待并立即有序关机。
+
+---
+
+### 开机启动脚本 (SAP S/4HANA)
+来电自愈热重启后，需要按 **先数据库、后应用服务器** 的顺序把 S/4HANA 拉起来：
+
+👉 **[SAP S/4HANA 启动脚本：scripts/common/s4hana_start.sh](../../scripts/common/s4hana_start.sh)**
+
+该脚本与关机钩子共用同一份配置和同一把锁（`/run/s4hana_control.lock`），因此启动与停电关机不可能同时执行。它在启动前会做四项安全检查：**已接市电**、**电量不低于 40%**、**`/hana/*` 卷已挂载**、**没有待执行的关机计划** —— 这样即使系统是在停电中途用电池开机的，也不会去加载 192G 的内存数据库。脚本头部注释里附了可直接使用的 `s4hana.service` systemd unit。
+
+```bash
+sudo cp scripts/common/s4hana_start.sh /usr/local/bin/
+sudo chmod +x /usr/local/bin/s4hana_start.sh
+sudo /usr/local/bin/s4hana_start.sh --dry-run   # 先空跑，确认识别到的 SID 与实例号
+```
 
 ---
 
@@ -113,3 +131,34 @@ sudo chmod +x /etc/power_monitor.d/*
 # 每 5 分钟执行一次电源监控脚本，自动处理断电防灾与自愈重启
 */5 * * * * /usr/local/bin/power_monitor.sh
 ```
+
+#### 4. 配置日志轮转 (Logrotate)
+
+`/var/log/power_monitor.log` 会**无限增长** —— 因为 dispatcher 把所有钩子的输出（`sapcontrol`、`HDB stop`、`HDB info` 的完整回显）都重定向进了这个文件，一次停电事件就可能写入相当可观的内容。而 `/var` 被写满会破坏**这套防灾机制本身**：关机脚本连日志都写不进去。
+
+本仓库提供了现成的轮转规则：👉 **[configs/common/logrotate.d/power_monitor](../../configs/common/logrotate.d/power_monitor)**
+
+```bash
+sudo cp configs/common/logrotate.d/power_monitor /etc/logrotate.d/power_monitor
+sudo chmod 0644 /etc/logrotate.d/power_monitor
+sudo chown root:root /etc/logrotate.d/power_monitor
+
+# 校验语法并预演（--debug 只打印计划动作，不真正改文件）
+sudo logrotate --debug /etc/logrotate.d/power_monitor
+```
+
+策略说明：
+
+| 指令 | 作用 |
+| :--- | :--- |
+| `daily` + `rotate 180` | 按天切割，保留 **180 天**历史 |
+| `maxsize 20M` | 单个日志超过 20MB 就**提前**切割，不必等到当天结束 —— 防止某个钩子卡死时刷爆磁盘 |
+| `dateext` | 归档名为 `power_monitor.log-20260811`，180 份 `.1 .2 .3` 根本没法查 |
+| `compress` | 180 天纯文本没必要不压缩 |
+| `copytruncate` | **关键项**，见下 |
+
+> ⚠️ **为什么必须用 `copytruncate` 而不是默认的 rename + create？**
+> `power_monitor.sh` 以 `"$script" >> "$LOG_FILE" 2>&1 &` 启动钩子，像 `20_s4hana.sh` 这样的钩子会在停 HANA 的**整个过程中**一直持有这个文件句柄。若用默认的改名重建，正在运行的钩子会继续往**已被改名的旧 inode** 里写，于是你最关心的那次停电事件，在 `power_monitor.log` 里看起来是空的。
+> 而 `copytruncate` 经典的"长驻写入方留下旧偏移量、生成空洞文件"缺陷在这里不存在：`>>` 以 `O_APPEND` 打开文件，每次写入都落在当前文件末尾。
+
+同一份规则也覆盖了 `s4hana_start.sh` 写的 `/var/log/s4hana_start.log`。

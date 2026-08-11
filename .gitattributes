@@ -1,0 +1,7 @@
+# Shell scripts and Linux config files are deployed to Linux (RHEL/Debian):
+# they must keep LF endings even though this repository is edited on Windows
+# with core.autocrlf=true.
+#   - a CRLF shebang makes bash fail with "bad interpreter: No such file or directory"
+#   - a CRLF logrotate/systemd config makes the parser choke on the trailing \r
+*.sh        text eol=lf
+configs/**  text eol=lf

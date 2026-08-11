@@ -17,15 +17,45 @@ LOG_FILE="/var/log/power_monitor.log"
 SHUTDOWN_SCRIPTS_DIR="/etc/power_monitor.d"
 HOOK_PIDS_FILE="/run/power_monitor_hooks.pids"
 
+# Maximum time to wait for the custom hooks before rebooting on power restore.
+# Must exceed the slowest hook: stopping SAP HANA can take far longer than a few
+# minutes, and rebooting while "HDB stop" is still running would crash-stop the
+# database - which a log_mode=overwrite instance cannot roll forward from.
+HOOK_WAIT_TIMEOUT=3600
+
+# Locate the battery: not every ThinkPad exposes it as BAT0 (BAT1 is common too,
+# and multi-battery models number them differently). Hardcoding BAT0 would make
+# this script exit early on those machines and silently disable all protection.
+BAT_PATH=""
+for candidate in /sys/class/power_supply/BAT*; do
+    if [ -r "$candidate/status" ] && [ -r "$candidate/capacity" ]; then
+        BAT_PATH="$candidate"
+        break
+    fi
+done
+
+if [ -z "$BAT_PATH" ]; then
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - Error: No battery found under /sys/class/power_supply/BAT*." >> "$LOG_FILE"
+    exit 1
+fi
+
 # Read battery status and current capacity
-BAT_STATUS=$(cat /sys/class/power_supply/BAT0/status 2>/dev/null)
-BAT_CAPACITY=$(cat /sys/class/power_supply/BAT0/capacity 2>/dev/null)
+BAT_STATUS=$(cat "$BAT_PATH/status" 2>/dev/null)
+BAT_CAPACITY=$(cat "$BAT_PATH/capacity" 2>/dev/null)
 
 # Exit if battery files cannot be read
 if [ -z "$BAT_STATUS" ] || [ -z "$BAT_CAPACITY" ]; then
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - Error: Cannot read battery status or capacity." >> "$LOG_FILE"
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - Error: Cannot read battery status or capacity from $BAT_PATH." >> "$LOG_FILE"
     exit 1
 fi
+
+# Guard against a non-numeric capacity: the comparisons below would otherwise
+# abort the script with a syntax error and skip the shutdown entirely.
+case "$BAT_CAPACITY" in
+    ''|*[!0-9]*)
+        echo "$(date '+%Y-%m-%d %H:%M:%S') - Error: Battery capacity '$BAT_CAPACITY' is not numeric." >> "$LOG_FILE"
+        exit 1 ;;
+esac
 
 # ------------------------------------------------------------------------------
 # Case A: Systemd Shutdown is already in progress (scheduled shutdown file exists)
@@ -45,7 +75,7 @@ if [ -f "$SYSTEMD_SHUTDOWN_FILE" ]; then
         # 2. Wait for any active custom shutdown scripts to finish gracefully
         if [ -f "$HOOK_PIDS_FILE" ]; then
             echo "$(date '+%Y-%m-%d %H:%M:%S') - [Self-Healing] Active hooks detected. Waiting for database/application flushes..." >> "$LOG_FILE"
-            timeout=300 # 5 minutes max timeout
+            timeout=$HOOK_WAIT_TIMEOUT
             while [ $timeout -gt 0 ]; do
                 any_running=false
                 # Check each PID from the tracking file
@@ -64,7 +94,11 @@ if [ -f "$SYSTEMD_SHUTDOWN_FILE" ]; then
                 timeout=$((timeout - 5))
             done
             rm -f "$HOOK_PIDS_FILE"
-            echo "$(date '+%Y-%m-%d %H:%M:%S') - [Self-Healing] All running hooks have completed gracefully." >> "$LOG_FILE"
+            if [ "$any_running" = true ]; then
+                echo "$(date '+%Y-%m-%d %H:%M:%S') - [Self-Healing] WARNING: Hooks still running after ${HOOK_WAIT_TIMEOUT}s. Rebooting anyway - a database may be stopped hard!" >> "$LOG_FILE"
+            else
+                echo "$(date '+%Y-%m-%d %H:%M:%S') - [Self-Healing] All running hooks have completed gracefully." >> "$LOG_FILE"
+            fi
         fi
         
         # 3. Safe system warm-reboot to cleanly restart all systemd services in correct order
@@ -94,8 +128,15 @@ if [ "$BAT_STATUS" = "Discharging" ] && [ "$BAT_CAPACITY" -lt "$SAFE_THRESHOLD" 
         for script in "$SHUTDOWN_SCRIPTS_DIR"/*; do
             if [ -x "$script" ]; then
                 echo "$(date '+%Y-%m-%d %H:%M:%S') - [Dispatcher] Triggering custom hook: $script" >> "$LOG_FILE"
-                # Run script in the background and log
-                "$script" >> "$LOG_FILE" 2>&1 &
+                # Run the hook in its own session (setsid) so that it survives the
+                # teardown of this cron job's login session. With
+                # logind KillUserProcesses=yes, plain background children would be
+                # SIGKILLed the moment this script exits - killing "HDB stop" halfway.
+                if command -v setsid >/dev/null 2>&1; then
+                    setsid "$script" >> "$LOG_FILE" 2>&1 &
+                else
+                    "$script" >> "$LOG_FILE" 2>&1 &
+                fi
                 # Store the spawned background process PID for precise tracking
                 echo $! >> "$HOOK_PIDS_FILE"
             fi

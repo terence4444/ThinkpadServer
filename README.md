@@ -24,7 +24,7 @@
 *   **[BIOS 通用安全与降耗配置](docs/common/bios_hardware.md)**
     *   Memory Protection (DEP)、Intel PTT 安全加固、无用外设 (蓝牙/指纹/摄像头) 彻底断电降耗
 *   **[电池保护 (TLP) 与停电 40% 模块化优雅关机](docs/common/power_battery.md)**
-    *   TLP 充电上限配置 (开始 45%，结束 50%)，写入主板 EC，彻底防止电池鼓包
+    *   TLP 充电上限配置 (开始 60%，结束 65%)，写入主板 EC，彻底防止电池鼓包
     *   轻量级 Bash 放电监控脚本，40% 电量以下自动触发关机倒计时，通过模块化钩子优雅停止 ClickHouse/SAP 等高负载应用
 *   **[笔记本合盖休眠行为控制](docs/common/sleep_config.md)**
     *   修改 systemd `logind.conf`，配置合盖不挂起/不休眠
