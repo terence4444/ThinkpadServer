@@ -23,8 +23,11 @@
 
 *   **[BIOS 通用安全与降耗配置](docs/common/bios_hardware.md)**
     *   Memory Protection (DEP)、Intel PTT 安全加固、无用外设 (蓝牙/指纹/摄像头) 彻底断电降耗
+*   **[双 SSD 磁盘分工原则 (DRAM 盘 vs 无 DRAM 盘)](docs/common/disk_layout.md)**
+    *   无 DRAM 的自带盘只放 OS 和备份，数据库、应用工作目录、传输目录、swap 等经常写的内容全部放 DRAM 盘
+    *   用 `nvme id-ctrl` 的 HMB 字段判断盘有没有 DRAM，安装时只处理 OS 盘
 *   **[电池保护 (TLP) 与停电 40% 模块化优雅关机](docs/common/power_battery.md)**
-    *   TLP 充电上限配置 (开始 60%，结束 65%)，写入主板 EC，彻底防止电池鼓包
+    *   TLP 充电上限配置 (开始 58%，结束 64%)，写入主板 EC，彻底防止电池鼓包；RHEL 10 没有 TLP 时用 systemd 服务写 sysfs
     *   轻量级 Bash 放电监控脚本，40% 电量以下自动触发关机倒计时，通过模块化钩子优雅停止 ClickHouse/SAP 等高负载应用
 *   **[笔记本合盖休眠行为控制](docs/common/sleep_config.md)**
     *   修改 systemd `logind.conf`，配置合盖不挂起/不休眠
@@ -68,7 +71,7 @@
     *   禁用 Absolute Persistence (Computrace) 确保系统纯净
     *   禁用 Secure Boot 防止独显驱动与内核驱动签名报错
     *   禁用 FIPS Mode 规避 SAP 服务及密码库运行报错与损耗
-    *   安装 `Server with GUI` 以保证 SAP 所需图形依赖完整，随后切换为 multi-user.target 字符界面省电省内存
+    *   P16CHD 安装的是 `Server with GUI`，随后切换为 multi-user.target 字符界面；装完后从未用过 GUI，因此新机器直接安装 `Server`（不带 GUI）
     *   **一键补齐 SAP 核心依赖包 (如 compat-sap-c++、compat-openssl11 等) 与 Tuned 调优服务**
 *   **[大内存 Swap 设计与双 SSD 动态 LVM 挂载方案](docs/sap_s4hana_thinkpad/storage_hana.md)**
     *   第一块盘手动建立 64GB 强力 Swap 逻辑卷与独立引导分区

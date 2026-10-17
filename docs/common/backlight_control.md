@@ -15,6 +15,16 @@
 ### 🚨 核心避坑：找不到背光控制路径（如 `/sys/class/backlight/` 目录为空）
 在具有双显卡（Intel/AMD 核显 + NVIDIA 独显）的 ThinkPad 工作站（如 P16）上，如果你在系统中发现上述背光控制路径不存在，说明系统当前可能处于**仅独显直连模式 (Discrete Graphics)**，或者 RHEL 系统内核没有正确识别到 Intel 集显。
 
+**先检查启动参数里有没有 `nomodeset`**：`cat /proc/cmdline`。用 basic graphics mode 安装 RHEL 时会被永久写进去，它会阻止核显驱动加载，这时背光目录一定是空的。去掉方法：`sudo grubby --update-kernel=ALL --remove-args=nomodeset`，然后重启（P16EQ1 就是这个原因）。
+
+**屏幕亮着时在空控制台闪烁、打开 btop 等持续刷新的程序就不闪**：这是核显的面板自刷新（PSR）引起的。画面静止时屏幕进入自刷新状态，这块屏幕在进出该状态时会闪；有程序持续刷新画面时进不了这个状态，所以不闪。解决办法是关掉 PSR（P16EQ1 已验证有效；P16CHD 的 `enable_psr` 也是 `-1`，有同样的问题，需要时照做）：
+```bash
+cat /sys/module/i915/parameters/enable_psr     # -1 = 自动（开启），0 = 关闭
+sudo grubby --update-kernel=ALL --args="i915.enable_psr=0"
+sudo reboot
+```
+如果关了 PSR 还闪，再加 `i915.enable_panel_replay=0`（Panel Replay 是 PSR 在新平台上的后继功能）。屏幕平时是关着的，关闭这两项对功耗几乎没有影响。
+
 **完美解决方案**：
 1.  **处理独显驱动与电源优化**：首先参照专属指南 **[NVIDIA 独显极致省电、降温与休眠配置](nvidia_gpu_power.md)**，部署 NVIDIA 官方专有驱动、配置 Runtime 深度休眠并关闭唤醒服务。
 2.  **切换显卡模式为 Hybrid**：重新启动笔记本，按 `F1` 进入 UEFI BIOS，依次进入 `Config ➙ Display ➙ Graphic Devices`，将显卡选项从 `Discrete Graphics` 改为 **`Hybrid Graphics`（混合显卡模式）**。

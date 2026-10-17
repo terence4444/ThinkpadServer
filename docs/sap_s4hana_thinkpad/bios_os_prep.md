@@ -25,7 +25,9 @@
 *   **避坑解析**: FIPS (联邦信息处理标准) 是极为严苛的系统级加密协议。**强烈建议在安装或配置 RHEL 时禁用 FIPS Mode**。若开启，会导致 SAP 的底层组件和特定高敏感密码库在运行过程中因严格的加密哈希校验出现报错、闪退，甚至带来不必要的系统运行损耗。
 
 ### 2.2 软件选择 (Software Selection)
-*   **推荐设定**: `Server with GUI` (带图形界面的服务器)
+*   **推荐设定（新机器）**: `Server`（不带 GUI）
+*   **原因**: P16CHD 装完后从来没有用过图形界面。SWPM 是通过浏览器远程操作的，本机不需要 GUI；SAP 内核需要的少量 X11 相关包（如 `xorg-x11-xauth`）装系统后用 dnf 单独安装即可。P16EQ1 起按这个设定安装。
+*   **P16CHD 的现状**: 安装的是 `Server with GUI`，当时的考虑如下（保留作为记录）：
 *   **避坑解析**: 
     1.  **图形依赖库**: 虽然生产环境服务器不需要图形界面，但 SAP 安装器及 SAP 内核（Kernel）本身深度依赖大量的 **X11、GTK、图形渲染、中文字体与图形依赖包**。如果选择最小化安装 (Minimal Install)，后续补全图形开发包会非常繁琐。
     2.  **优雅调优 (装后切命令行)**: 安装完成后，通过以下命令将系统的默认启动级别切回到“纯命令行模式”（多用户模式），以节省 1~2G 的系统内存占用：
@@ -40,6 +42,13 @@
     1.  选择 `Troubleshooting`。
     2.  点击进入 `Install Red Hat Enterprise Linux in basic graphics mode`（基础显卡模式安装）。
     3.  或者，在引导参数末尾手动追加键盘参数：`nomodeset`。
+
+    ⚠ **装完后一定要去掉 `nomodeset`**：用 basic graphics mode 安装时，安装程序会把 `nomodeset` 永久写进启动参数。它会让 Intel 核显驱动（`i915`/`xe`）无法加载，结果 `/sys/class/backlight/` 是空的，背光脚本没有设备可控（P16EQ1 上就是这样）。检查并去掉：
+    ```bash
+    cat /proc/cmdline                                    # 有没有 nomodeset
+    sudo grubby --update-kernel=ALL --remove-args=nomodeset
+    sudo reboot
+    ```
 *   **用户创建**:
     在系统安装引导中，**可以不创建任何普通用户**，仅为 `root` 设置强密码即可。因为 SAP 安装程序（如 SWPM）在后续初始化部署时，会自动在操作系统的底层 and 用户组里创建其专属的运行账号（如 `hxadm`）。
 

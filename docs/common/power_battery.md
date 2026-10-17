@@ -27,16 +27,36 @@ ThinkPad 官方 BIOS 通常不提供充电上限设置。如果直接插着电�
     TLP_ENABLE=1
     
     # 设置电池充电阈值（适用于主电池 BAT0）
-    # 当电量低于 60% 时开始充电，达到 65% 时停止充电
-    START_CHARGE_THRESH_BAT0=60
-    STOP_CHARGE_THRESH_BAT0=65
+    # 当电量低于 58% 时开始充电，达到 64% 时停止充电
+    START_CHARGE_THRESH_BAT0=58
+    STOP_CHARGE_THRESH_BAT0=64
     ```
+    > 电池名以 `ls /sys/class/power_supply/` 为准，如果是 `BAT1`，变量名也要相应改成 `..._BAT1`。
+    >
+    > 现状：P16CHD 当前配置的是 60/65，P16EQ1 起使用 58/64。
+    >
+    > **RHEL 10 上没有 TLP**（EPEL 10 里找不到这个包）。可以改用 systemd 服务在开机时直接写 sysfs，效果相同，P16EQ1 就是这样做的：
+    > ```ini
+    > # /etc/systemd/system/battery-charge-threshold.service
+    > [Unit]
+    > Description=Set battery charge thresholds (start 58%, stop 64%)
+    > After=multi-user.target
+    >
+    > [Service]
+    > Type=oneshot
+    > ExecStart=/bin/sh -c 'B=/sys/class/power_supply/BAT0; echo 64 > $B/charge_control_end_threshold; echo 58 > $B/charge_control_start_threshold'
+    > RemainAfterExit=yes
+    >
+    > [Install]
+    > WantedBy=multi-user.target
+    > ```
+    > `systemctl daemon-reload && systemctl enable --now battery-charge-threshold.service`，然后用 `cat /sys/class/power_supply/BAT0/charge_control_{start,end}_threshold` 验证。
 3.  **启动并应用服务**:
     ```bash
     sudo tlp start
     ```
 4.  **生效验证**:
-    配置成功后，TLP 会将此阈值直接写入主板 EC 芯片。**即使关机或重装系统，该限制依然在主板硬件层面生效**，电池电量将永久保持在 60%~65% 之间，彻底消除鼓包隐患。
+    配置成功后，TLP 会将此阈值直接写入主板 EC 芯片。**即使关机或重装系统，该限制依然在主板硬件层面生效**，电池电量将永久保持在 58%~64% 之间，彻底消除鼓包隐患。
 
 ---
 
@@ -83,6 +103,9 @@ ThinkPad 官方 BIOS 通常不提供充电上限设置。如果直接插着电�
 
 *   👉 **[ClickHouse 优雅关机模板：scripts/common/shutdown.d/10_clickhouse.sh](../../scripts/common/shutdown.d/10_clickhouse.sh)**（⚠️ 当前为空文件，尚待填写）
 *   👉 **[SAP S/4HANA & HANA 优雅关机模板：scripts/common/shutdown.d/20_s4hana.sh](../../scripts/common/shutdown.d/20_s4hana.sh)**
+*   👉 **[SAP NetWeaver ABAP & MaxDB 优雅关机模板：scripts/common/shutdown.d/30_netweaver_maxdb.sh](../../scripts/common/shutdown.d/30_netweaver_maxdb.sh)**（P16EQ1 / ERP 6.0 EQ1 在用）：先 `sapcontrol StopSystem ALL`，等所有实例停止，再 `dbmcli -U c -d <DBSID> db_offline`（DBSID 从 `DEFAULT.PFL` 的 `rsdb/dbid` 自动读取）。和 HANA 版一样不强杀数据库，停库期间会推迟关机。测试：`sudo DRY_RUN=1 /etc/power_monitor.d/30_netweaver_maxdb.sh`
+
+> cron：除了 `crontab -e`，也可以用系统级的 `/etc/cron.d/power_monitor`（P16EQ1 用的就是这种）：`*/5 * * * * root /usr/local/bin/power_monitor.sh`。
 
 S/4HANA 钩子的特殊行为：因为该 HANA 实例使用 `log_mode = overwrite`，脚本**绝不强杀数据库**，而是在 `HDB stop` 运行期间持续把系统关机时刻往后推（每次 `+10` 分钟，仅在剩余不足 180 秒时续期），直到数据库确认停止后才关机；只有电量跌到 `CRITICAL_BATTERY`（默认 8%）以下才放弃等待并立即有序关机。
 
