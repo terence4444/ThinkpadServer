@@ -85,7 +85,14 @@ journalctl -u zcfan -f
 cat /proc/acpi/ibm/fan                                       # level: 0 = 停转
 ```
 
-⚠ **不要同时装 EPEL 的 `zcfan` 包**：它的服务文件在 `/usr/lib/systemd/system/zcfan.service`，虽然 `/usr/local` 下的优先级更高，但两个版本混在一起容易搞不清在跑哪一个（P16CHD 上两个都装了，实际运行的是 `/usr/local/bin/zcfan`）。
+⚠ **不要同时装 EPEL 的 `zcfan` 包**：它的服务文件在 `/usr/lib/systemd/system/zcfan.service`，虽然 `/usr/local` 下的优先级更高，但两个版本混在一起容易搞不清在跑哪一个。
+
+⚠ **卸载 EPEL 的 `zcfan` 包时**：它的卸载脚本会执行 `systemd-update-helper remove-system-units zcfan.service`，因为服务**同名**，正在运行的 fork 版也会被停止、禁用。卸载后要马上重新启用（P16CHD 2026-10-17 就是这样做的）：
+```bash
+sudo dnf remove -y zcfan          # 只删 /usr/bin 和 /usr/lib 下的文件，/usr/local 不受影响
+sudo systemctl daemon-reload && sudo systemctl enable --now zcfan.service
+systemctl show -p FragmentPath zcfan.service    # 应该是 /usr/local/lib/systemd/system/zcfan.service
+```
 
 ---
 
