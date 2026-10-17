@@ -29,6 +29,9 @@
 *   **[电池保护 (TLP) 与停电 40% 模块化优雅关机](docs/common/power_battery.md)**
     *   TLP 充电上限配置 (开始 58%，结束 64%)，写入主板 EC，彻底防止电池鼓包；RHEL 10 没有 TLP 时用 systemd 服务写 sysfs
     *   轻量级 Bash 放电监控脚本，40% 电量以下自动触发关机倒计时，通过模块化钩子优雅停止 ClickHouse/SAP 等高负载应用
+*   **[风扇控制 (zcfan fork 版)](docs/common/fan_control.md)**
+    *   空闲（50°C 以下）风扇停转，65°C 以上交回 EC 原厂控制
+    *   用 fork 版 zcfan（y1lichen/zcfan），官方 EPEL 版会频繁启停风扇
 *   **[笔记本合盖休眠行为控制](docs/common/sleep_config.md)**
     *   修改 systemd `logind.conf`，配置合盖不挂起/不休眠
 *   **[NVIDIA 独显极致省电、降温与休眠配置](docs/common/nvidia_gpu_power.md)**
