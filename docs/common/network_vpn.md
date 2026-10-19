@@ -54,12 +54,17 @@ systemctl reload NetworkManager
 
 `wifi.powersave` 的取值：`0` 默认，`1` 不管，`2` 关闭，`3` 打开。不要通过 Wi-Fi 上的 SSH 直接执行 `nmcli connection up`，会把自己断开。重启后用 `iw dev <IF> get power_save` 确认是 `off`。
 
-**没有装 `iw` 时**（比如 Debian 默认就没装）：NetworkManager 的配置照样能写，只是没法马上生效，要等 Wi-Fi 重新连接。不想重启的话，可以让重连在后台执行，不依赖当前的 SSH 会话（Wi-Fi 会断几秒，IP 按 MAC 固定，所以不会变）：
+**Debian 上提示 `iw: command not found`**：通常不是没装，而是 `iw` 在 `/usr/sbin`，普通用户的 PATH 里没有这个目录，加 `sudo` 就行（`sudo iw dev <IF> get power_save`）。
+
+**真的没有 `iw` 时**：NetworkManager 的配置照样能写，只是没法马上生效，要等 Wi-Fi 重新连接。不想重启的话，可以让重连在后台执行，不依赖当前的 SSH 会话（Wi-Fi 会断几秒，IP 按 MAC 固定，所以不会变）：
 
 ```bash
-nmcli -t -f NAME,DEVICE connection show --active | grep <IF>    # 看连接名
-sudo systemd-run --on-active=5 nmcli connection up "<连接名>"
+CONN="$(nmcli -g GENERAL.CONNECTION device show <IF>)"; echo "$CONN"   # 只取连接名，比如 ZDFLounge
+sudo systemd-run --on-active=5 nmcli connection up "$CONN"
+sudo journalctl -u NetworkManager --since "-2min" | grep -i "<IF>.*activat"   # 10 秒后确认重连成功
 ```
+
+注意：`nmcli -t -f NAME,DEVICE ...` 输出的是 `连接名:设备名`（比如 `ZDFLounge:wlp0s20f3`），不能整串当连接名用，否则 `connection up` 会失败，而且 `systemd-run` 在前台不会报错。
 
 这时服务器上看不到省电状态，就从另一台机器 ping 服务器来验证。
 
