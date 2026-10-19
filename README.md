@@ -39,6 +39,7 @@
     *   写入 PCIe 自动挂起规则，完全切断空闲显卡的 PCIe 供电并锁死 (Mask) 唤醒服务
 *   **[网络规范、OpenVPN 自动拨号与功耗 Bug 排查](docs/common/network_vpn.md)**
     *   路由器 DHCP 静态绑定规避 IP 冲突
+    *   用 Wi-Fi 时必须关闭 Wi-Fi 省电（NetworkManager 默认打开，别人访问服务器时每个包可能多等约 100 ms）
     *   软链接解决 Systemd 在超长或特殊字符 OpenVPN 配置文件名下的转义报错
     *   `btop++` 功耗误报（把 50Wh 剩余容量识别为 50W 功耗）的解决方案与 Snap 自动更新
 *   **[智能无桌面控光脚本与物理快捷键关联 (acpid)](docs/common/backlight_control.md)**

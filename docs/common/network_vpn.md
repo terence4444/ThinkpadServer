@@ -14,7 +14,71 @@
 
 ---
 
-## 2. OpenVPN 自动拨号与 Systemd 服务集成
+## 2. 关闭 Wi-Fi 省电（服务器用 Wi-Fi 时必须做）
+
+能插网线就插网线。只能用 Wi-Fi 时，必须关掉 Wi-Fi 省电。NetworkManager 默认会打开省电（`iw dev <IF> get power_save` 显示 `on`），这时网卡大部分时间在睡眠，发给服务器的包要先在路由器上缓存，等下一个 beacon（约 100 ms）才送到。服务器自己往外 ping 看不出问题，但**别人访问服务器**时，每个包都可能多等几十到一百毫秒。
+
+P16CHD 实测（2026-10-19，5 GHz，信号 -34 dBm，信号本身没有问题）：
+
+| 测量 | 省电开 | 省电关 |
+|---|---|---|
+| 局域网 PC ping 服务器 | 23–112 ms，平均 59 ms | 2–4 ms，平均 3 ms |
+| 经 VPN ping 服务器 | 平均 122 ms | 平均 47 ms |
+| 经 VPN 取一个 UI5 静态文件（首字节） | 460–700 ms | 约 260 ms |
+| 局域网取同一文件（首字节） | 60–130 ms | 28–48 ms |
+
+### 排查
+
+```bash
+nmcli device status                       # Wi-Fi 接口名和连接名（连接名不是接口名，比如 ZDFLounge）
+iw dev <IF> get power_save                # on = 开着省电
+iw dev <IF> link                          # 信号、频段、速率
+ping -c 50 -i 0.2 <路由器IP> | tail -2    # 服务器 → 路由器
+```
+
+最能说明问题的是**从另一台机器 ping 服务器**：局域网里应该是几毫秒，抖动很小。Windows 默认防火墙不回 ping，所以从服务器 ping Windows PC 不通是正常的。
+
+### 关闭
+
+```bash
+# 立即生效，连接不断
+iw dev <IF> set power_save off
+
+# 永久：所有 Wi-Fi 连接默认关闭省电（下次连接时生效）
+cat > /etc/NetworkManager/conf.d/wifi-powersave-off.conf <<'EOF'
+[connection]
+wifi.powersave = 2
+EOF
+systemctl reload NetworkManager
+```
+
+`wifi.powersave` 的取值：`0` 默认，`1` 不管，`2` 关闭，`3` 打开。不要通过 Wi-Fi 上的 SSH 直接执行 `nmcli connection up`，会把自己断开。重启后用 `iw dev <IF> get power_save` 确认是 `off`。
+
+**没有装 `iw` 时**（比如 Debian 默认就没装）：NetworkManager 的配置照样能写，只是没法马上生效，要等 Wi-Fi 重新连接。不想重启的话，可以让重连在后台执行，不依赖当前的 SSH 会话（Wi-Fi 会断几秒，IP 按 MAC 固定，所以不会变）：
+
+```bash
+nmcli -t -f NAME,DEVICE connection show --active | grep <IF>    # 看连接名
+sudo systemd-run --on-active=5 nmcli connection up "<连接名>"
+```
+
+这时服务器上看不到省电状态，就从另一台机器 ping 服务器来验证。
+
+### 可选：在驱动这一层关闭（Intel `iwlmvm`）
+
+不管用不用 NetworkManager 都能用。先用 `lsmod | grep -E '^iwl(mvm|mld)'` 确认驱动是 `iwlmvm`。如果是 `iwlmld`（新的 Wi-Fi 7 驱动），这个参数不适用。
+
+```bash
+echo 'options iwlmvm power_scheme=1' | sudo tee /etc/modprobe.d/iwlmvm-no-powersave.conf
+```
+
+- `power_scheme` 的取值：`1` 一直醒着，`2` balanced（默认），`3` 最省电。
+- 驱动加载时才读这个参数，所以要重启机器才生效。不要通过 SSH 重新加载 `iwlwifi` 模块，Wi-Fi 会断。
+- 重启后用 `cat /sys/module/iwlmvm/parameters/power_scheme` 确认输出是 `1`。
+- 有了上面 NetworkManager 的配置，这一步不是必须的，只是在驱动这一层再保一次险，代价是 Wi-Fi 多耗零点几瓦的电。
+
+---
+
+## 3. OpenVPN 自动拨号与 Systemd 服务集成
 
 当服务器需要加入公司内网或异地组网时，我们需要通过 OpenVPN 在后台自动拨号，并挂载 `tun0` 虚拟网卡。
 
